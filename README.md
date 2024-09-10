@@ -6,6 +6,8 @@
   Talk to LLMs with your friends!
 </i></h3>
 
+<p>forked from jakobdylanc/llmcord.py</p>
+
 <p align="center">
   <img src="https://github.com/jakobdylanc/llmcord.py/assets/38699060/789d49fe-ef5c-470e-b60e-48ac03057443" alt="">
 </p>
