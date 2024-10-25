@@ -30,6 +30,7 @@ Additionally:
 ### Choose any LLM
 llmcord.py supports remote models from:
 - [OpenAI API](https://platform.openai.com/docs/models)
+- [xAI API](https://docs.x.ai/docs#models) (**New!**)
 - [Mistral API](https://docs.mistral.ai/platform/endpoints)
 - [Groq API](https://console.groq.com/docs/models)
 - [OpenRouter API](https://openrouter.ai/docs/models)
@@ -47,7 +48,7 @@ Or use any other OpenAI compatible API server.
 - Supports text file attachments (.txt, .py, .c, etc.)
 - Customizable system prompt
 - DM for private access (no @ required)
-- User identity aware (OpenAI API only)
+- User identity aware (OpenAI API and xAI API only)
 - Streamed responses (turns green when complete, automatically splits into separate messages when too long)
 - Displays helpful warning messages when appropriate (like "⚠️ Only using last 25 messages" when the customizable message limit is exceeded)
 - Caches message data in a size-managed (no memory leaks) and mutex-protected (no race conditions) global dictionary to maximize efficiency and minimize Discord API calls
@@ -68,9 +69,9 @@ Before you start, install Python and clone this git repo.
 | Setting | Description |
 | --- | --- |
 | **providers** | Add the LLM providers you want to use, each with a `base_url` and optional `api_key` entry. Common providers (`openai`, `ollama`, etc.) are already included. **Only supports OpenAI compatible APIs.** |
-| **model** | Set to `<provider name>/<model name>`, e.g:<br /><br />-`openai/gpt-4o`<br />-`ollama/llama3.1`<br />-`openrouter/anthropic/claude-3.5-sonnet` |
+| **model** | Set to `<provider name>/<model name>`, e.g:<br /><br />-`openai/gpt-4o`<br />-`ollama/llama3.2`<br />-`openrouter/anthropic/claude-3.5-sonnet` |
 | **extra_api_parameters** | Extra API parameters for your LLM. Add more entries as needed.<br />(Default: `max_tokens=4096, temperature=1.0`) |
-| **system_prompt** | Write anything you want to customize the bot's behavior! |
+| **system_prompt** | Write anything you want to customize the bot's behavior! **Leave blank for no system prompt.** |
 
 ### Discord settings:
 
@@ -84,12 +85,12 @@ Before you start, install Python and clone this git repo.
 | **max_text** | The maximum amount of text allowed in a single message, including text from file attachments.<br />(Default: `100,000`) |
 | **max_images** | The maximum number of image attachments allowed in a single message. **Only applicable when using a vision model.**<br />(Default: `5`) |
 | **max_messages** | The maximum number of messages allowed in a reply chain.<br />(Default: `25`) |
-| **use_plain_responses** | When set to `true` the bot's messages appear more like a regular user message. **This disables embeds, streamed responses and warning messages**.<br />(Default: `false`) |
+| **use_plain_responses** | When set to `true` the bot will use plaintext responses instead of embeds. Also, streamed responses and warning messages will be disabled.<br />(Default: `false`) |
 
 ## Notes
 - If you're having issues, try my suggestions [here](https://github.com/jakobdylanc/llmcord.py/issues/19)
 
-- Only models from OpenAI are "user identity aware" because only OpenAI API supports the message "name" property. Hopefully others support this in the future.
+- Only models from OpenAI API and xAI API are "user identity aware" because only they support the "name" parameter in the message object. Hopefully more providers support this in the future.
 
 - PRs are welcome :)
 
