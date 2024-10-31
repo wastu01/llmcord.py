@@ -5,3 +5,5 @@
 !*.md
 !*.py
 !config-example.json
+*.md
+*.txt
