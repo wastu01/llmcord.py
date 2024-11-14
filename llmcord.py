@@ -2,13 +2,13 @@ import asyncio
 from base64 import b64encode
 from dataclasses import dataclass, field
 from datetime import datetime as dt
-import json
 import logging
 from typing import Literal, Optional
 
 import discord
 import httpx
 from openai import AsyncOpenAI
+import yaml
 
 logging.basicConfig(
     level=logging.INFO,
@@ -30,25 +30,25 @@ EDIT_DELAY_SECONDS = 1
 MAX_MESSAGE_NODES = 100
 
 
-def get_config(filename="config.json"):
+def get_config(filename="config.yaml"):
     with open(filename, "r") as file:
-        return {k: v for d in json.load(file).values() for k, v in d.items()}
+        return yaml.safe_load(file)
 
 
 cfg = get_config()
 
+if client_id := cfg["client_id"]:
+    logging.info(f"\n\nBOT INVITE URL:\nhttps://discord.com/api/oauth2/authorize?client_id={client_id}&permissions=412317273088&scope=bot\n")
+
 intents = discord.Intents.default()
 intents.message_content = True
-activity = discord.CustomActivity(name=cfg["status_message"][:128] or "github.com/jakobdylanc/llmcord.py")
+activity = discord.CustomActivity(name=(cfg["status_message"] or "github.com/jakobdylanc/llmcord")[:128])
 discord_client = discord.Client(intents=intents, activity=activity)
 
 httpx_client = httpx.AsyncClient()
 
 msg_nodes = {}
 last_task_time = None
-
-if cfg["client_id"] != 123456789:
-    print(f"\nBOT INVITE URL:\nhttps://discord.com/api/oauth2/authorize?client_id={cfg['client_id']}&permissions=412317273088&scope=bot\n")
 
 
 @dataclass
@@ -80,8 +80,11 @@ async def on_message(new_msg):
 
     cfg = get_config()
 
-    if (cfg["allowed_channel_ids"] and not any(id in cfg["allowed_channel_ids"] for id in (new_msg.channel.id, getattr(new_msg.channel, "parent_id", None)))) or (
-        cfg["allowed_role_ids"] and (new_msg.channel.type == discord.ChannelType.private or not any(role.id in cfg["allowed_role_ids"] for role in new_msg.author.roles))
+    allowed_channel_ids = cfg["allowed_channel_ids"]
+    allowed_role_ids = cfg["allowed_role_ids"]
+
+    if (allowed_channel_ids and not any(id in allowed_channel_ids for id in (new_msg.channel.id, getattr(new_msg.channel, "parent_id", None)))) or (
+        allowed_role_ids and not any(role.id in allowed_role_ids for role in getattr(new_msg.author, "roles", []))
     ):
         return
 
@@ -133,20 +136,15 @@ async def on_message(new_msg):
                 try:
                     if (
                         curr_msg.reference == None
-                        and curr_msg.channel.type != discord.ChannelType.private
                         and discord_client.user.mention not in curr_msg.content
                         and (prev_msg_in_channel := ([m async for m in curr_msg.channel.history(before=curr_msg, limit=1)] or [None])[0])
                         and any(prev_msg_in_channel.type == type for type in (discord.MessageType.default, discord.MessageType.reply))
-                        and prev_msg_in_channel.author == curr_msg.author
+                        and prev_msg_in_channel.author == (discord_client.user if curr_msg.channel.type == discord.ChannelType.private else curr_msg.author)
                     ):
                         curr_node.next_msg = prev_msg_in_channel
                     else:
                         next_is_thread_parent: bool = curr_msg.reference == None and curr_msg.channel.type == discord.ChannelType.public_thread
                         if next_msg_id := curr_msg.channel.id if next_is_thread_parent else getattr(curr_msg.reference, "message_id", None):
-                            next_node = msg_nodes.setdefault(next_msg_id, MsgNode())
-                            while next_node.lock.locked():
-                                await asyncio.sleep(0)
-
                             curr_node.next_msg = (
                                 (curr_msg.channel.starter_message or await curr_msg.channel.parent.fetch_message(next_msg_id))
                                 if next_is_thread_parent
@@ -156,13 +154,13 @@ async def on_message(new_msg):
                     logging.exception("Error fetching next message in the chain")
                     curr_node.fetch_next_failed = True
 
-            if curr_node.text[:max_text] or curr_node.images[:max_images]:
-                if accept_images and curr_node.images[:max_images]:
-                    content = ([dict(type="text", text=curr_node.text[:max_text])] if curr_node.text[:max_text] else []) + curr_node.images[:max_images]
-                else:
-                    content = curr_node.text[:max_text]
+            if curr_node.images[:max_images]:
+                content = ([dict(type="text", text=curr_node.text[:max_text])] if curr_node.text[:max_text] else []) + curr_node.images[:max_images]
+            else:
+                content = curr_node.text[:max_text]
 
-                message = dict(role=curr_node.role, content=content)
+            if content:
+                message = dict(content=content, role=curr_node.role)
                 if accept_usernames and curr_node.user_id != None:
                     message["name"] = str(curr_node.user_id)
 
@@ -181,13 +179,13 @@ async def on_message(new_msg):
 
     logging.info(f"Message received (user ID: {new_msg.author.id}, attachments: {len(new_msg.attachments)}, conversation length: {len(messages)}):\n{new_msg.content}")
 
-    if cfg["system_prompt"]:
+    if system_prompt := cfg["system_prompt"]:
         system_prompt_extras = [f"Today's date: {dt.now().strftime('%B %d %Y')}."]
         if accept_usernames:
             system_prompt_extras.append("User's names are their Discord IDs and should be typed as '<@ID>'.")
 
-        system_prompt = dict(role="system", content="\n".join([cfg["system_prompt"]] + system_prompt_extras))
-        messages.append(system_prompt)
+        full_system_prompt = dict(role="system", content="\n".join([system_prompt] + system_prompt_extras))
+        messages.append(full_system_prompt)
 
     # Generate and send response message(s) (can be multiple if response is long)
     response_msgs = []
@@ -242,7 +240,7 @@ async def on_message(new_msg):
         if use_plain_responses:
             for content in response_contents:
                 reply_to_msg = new_msg if response_msgs == [] else response_msgs[-1]
-                response_msg = await reply_to_msg.reply(content=content)
+                response_msg = await reply_to_msg.reply(content=content, suppress_embeds=True)
                 msg_nodes[response_msg.id] = MsgNode(next_msg=new_msg)
                 await msg_nodes[response_msg.id].lock.acquire()
                 response_msgs.append(response_msg)

@@ -1,9 +1,18 @@
+# This gitignore is a whitelist. Inspired by https://rgbcu.be/blog/gitignore
+
+# Ignore all files by default
 *
 
+# Do not ignore the .gitignore file itself
 !.gitignore
 
+# Do not ignore specific file types
 !*.md
 !*.py
+!requirements.txt
+
+# Do not ignore specific configuration and setup files
 !config-example.json
-*.md
-*.txt
+!config-example.yaml
+!docker-compose.yaml
+!Dockerfile
