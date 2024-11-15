@@ -37,18 +37,18 @@ def get_config(filename="config.yaml"):
 
 cfg = get_config()
 
-if client_id := cfg["client_id"]:
-    logging.info(f"\n\nBOT INVITE URL:\nhttps://discord.com/api/oauth2/authorize?client_id={client_id}&permissions=412317273088&scope=bot\n")
-
 intents = discord.Intents.default()
 intents.message_content = True
-activity = discord.CustomActivity(name=(cfg["status_message"] or "github.com/jakobdylanc/llmcord")[:128])
+activity = discord.CustomActivity(name=cfg["status_message"][:128] if cfg["status_message"] else "github.com/jakobdylanc/llmcord")
 discord_client = discord.Client(intents=intents, activity=activity)
 
 httpx_client = httpx.AsyncClient()
 
 msg_nodes = {}
 last_task_time = None
+
+if cfg["client_id"]:
+    logging.info(f"\n\nBOT INVITE URL:\nhttps://discord.com/api/oauth2/authorize?client_id={cfg['client_id']}&permissions=412317273088&scope=bot\n")
 
 
 @dataclass
@@ -80,11 +80,8 @@ async def on_message(new_msg):
 
     cfg = get_config()
 
-    allowed_channel_ids = cfg["allowed_channel_ids"]
-    allowed_role_ids = cfg["allowed_role_ids"]
-
-    if (allowed_channel_ids and not any(id in allowed_channel_ids for id in (new_msg.channel.id, getattr(new_msg.channel, "parent_id", None)))) or (
-        allowed_role_ids and not any(role.id in allowed_role_ids for role in getattr(new_msg.author, "roles", []))
+    if (cfg["allowed_channel_ids"] and not any(id in cfg["allowed_channel_ids"] for id in (new_msg.channel.id, getattr(new_msg.channel, "parent_id", None)))) or (
+        cfg["allowed_role_ids"] and (new_msg.channel.type == discord.ChannelType.private or not any(role.id in cfg["allowed_role_ids"] for role in new_msg.author.roles))
     ):
         return
 
@@ -145,6 +142,10 @@ async def on_message(new_msg):
                     else:
                         next_is_thread_parent: bool = curr_msg.reference == None and curr_msg.channel.type == discord.ChannelType.public_thread
                         if next_msg_id := curr_msg.channel.id if next_is_thread_parent else getattr(curr_msg.reference, "message_id", None):
+                            next_node = msg_nodes.setdefault(next_msg_id, MsgNode())
+                            while next_node.lock.locked():
+                                await asyncio.sleep(0)
+
                             curr_node.next_msg = (
                                 (curr_msg.channel.starter_message or await curr_msg.channel.parent.fetch_message(next_msg_id))
                                 if next_is_thread_parent
@@ -154,12 +155,12 @@ async def on_message(new_msg):
                     logging.exception("Error fetching next message in the chain")
                     curr_node.fetch_next_failed = True
 
-            if curr_node.images[:max_images]:
-                content = ([dict(type="text", text=curr_node.text[:max_text])] if curr_node.text[:max_text] else []) + curr_node.images[:max_images]
-            else:
-                content = curr_node.text[:max_text]
+            if curr_node.text[:max_text] or curr_node.images[:max_images]:
+                if accept_images and curr_node.images[:max_images]:
+                    content = ([dict(type="text", text=curr_node.text[:max_text])] if curr_node.text[:max_text] else []) + curr_node.images[:max_images]
+                else:
+                    content = curr_node.text[:max_text]
 
-            if content:
                 message = dict(content=content, role=curr_node.role)
                 if accept_usernames and curr_node.user_id != None:
                     message["name"] = str(curr_node.user_id)
@@ -179,13 +180,13 @@ async def on_message(new_msg):
 
     logging.info(f"Message received (user ID: {new_msg.author.id}, attachments: {len(new_msg.attachments)}, conversation length: {len(messages)}):\n{new_msg.content}")
 
-    if system_prompt := cfg["system_prompt"]:
+    if cfg["system_prompt"]:
         system_prompt_extras = [f"Today's date: {dt.now().strftime('%B %d %Y')}."]
         if accept_usernames:
             system_prompt_extras.append("User's names are their Discord IDs and should be typed as '<@ID>'.")
 
-        full_system_prompt = dict(role="system", content="\n".join([system_prompt] + system_prompt_extras))
-        messages.append(full_system_prompt)
+        system_prompt = dict(role="system", content="\n".join([cfg["system_prompt"]] + system_prompt_extras))
+        messages.append(system_prompt)
 
     # Generate and send response message(s) (can be multiple if response is long)
     response_msgs = []
